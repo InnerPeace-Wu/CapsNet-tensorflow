@@ -25,23 +25,55 @@ in `ROOT` directory.
 
 ## Train
 
-* clone the repo
+* clone the repo, and set up parameters in `code/config.py`
 * then 
 
 ```bash
-cd $ROOT
+cd $ROOT/code
 python train.py
+```
+or train with logs by runing:(not tested yet)
+```bash
+$ bash train.sh
 ```
 
 ## Experiments
 
-1. current commit. With several bugs about to fix.
+Note: all trained with `batch_size = 100`
+
+latest commit with `3 iterations of dynamic routing`:
+    
+    1. update dynamic routing with tf.while_loop and static way
+    2. fix margin loss issue
+    
+**result:**
+
+Iterations | 1k     | 2k    | 3k    | 4k    | 5k    
+:---------:|:------:|:-----:|:-----:|:-----:|:-----:
+  val_acc  | 98.90  | 99.16 | 99.09 | 99.30 | - 
+  test_acc |   -    |   -   | -     |   -   |   -   
+
+commit [8e3785d](https://github.com/InnerPeace-Wu/CapsNet-tensorflow/tree/8e3785d5b6f34c13c81555edd97a6241a7885209). 
+
+    with bugs:
+    1. wrong implementation of margin loss
+    2. updating `prior` during routing 
+    
+**result:**
 
 Iterations | 2k     | 4k    | 5k    | 7k    | 9k    | 10k   
 :---------:|:------:|:-----:|:-----:|:-----:|:-----:|:-----:
   val_acc  | 98.02  | 98.58 |  -    | 98.82 | 98.96 | -
   test_acc |   -    |   -   | 98.89 |   -   |   -   | 99.09 
+  
+
 
 
 ## TODO
+- [ ] fix the inefficacy
 - [ ] report exclusive experiment results
+
+## Reference
+
+* [Keras implementation](https://github.com/XifengGuo/CapsNet-Keras)
+* Discussion about **routing algorithm**, [issue](https://github.com/naturomics/CapsNet-Tensorflow/issues/8) and [issue](https://github.com/XifengGuo/CapsNet-Keras/issues/1)

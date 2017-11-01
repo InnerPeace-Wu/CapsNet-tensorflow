@@ -12,11 +12,11 @@ import sys
 import time
 
 import tensorflow as tf
+from config import cfg
 from six.moves import xrange
 from tensorflow.examples.tutorials.mnist import input_data
 
 from CapsNet import CapsNet
-from config import cfg
 
 FLAGS = None
 
@@ -44,7 +44,7 @@ def main(_):
     ckpt = tf.train.get_checkpoint_state(train_dir)
 
     with tf.Session(config=config) as sess:
-        if ckpt:
+        if ckpt and cfg.USE_CKPT:
             print("Reading parameters from %s" % ckpt.model_checkpoint_path)
             caps_net.saver.restore(sess, ckpt.model_checkpoint_path)
         else:
@@ -52,6 +52,9 @@ def main(_):
             sess.run(tf.global_variables_initializer())
             print('Num params: %d' % sum(v.get_shape().num_elements()
                                          for v in tf.trainable_variables()))
+        # test
+        # caps_net.test(sess, 'test')
+        # exit()
 
         caps_net.train_writer.add_graph(sess.graph)
         iters = 0

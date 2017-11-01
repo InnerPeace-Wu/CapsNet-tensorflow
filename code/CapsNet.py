@@ -25,20 +25,15 @@ def squash(cap_input):
         cap_output: output of each capsules, which has the shape as cap_input
     """
 
-    # compute norm of inputs with the last axis, keep dims for broadcasting
-    # ||s_j|| in paper
-    input_norm = tf.norm(cap_input, ord=2, axis=-1,
-                         keep_dims=True, name='norm')
-    # input_norm shape: [None, h, w, 1]
-    # ||s_j||^2 in paper
-    input_norm_square = tf.square(input_norm, name='norm_square')
-
-    # ||s_j||^2 / (1. + ||s_j||^2) * (s_j / ||s_j||)
     with tf.name_scope('squash'):
-        cap_out = tf.div(input_norm_square,
-                         1. + input_norm_square) * tf.div(cap_input, input_norm)
+        # compute norm square of inputs with the last axis, keep dims for broadcasting
+        # ||s_j||^2 in paper
+        input_norm_square = tf.reduce_sum(tf.square(cap_input), axis=-1, keep_dims=True)
 
-    return cap_out
+        # ||s_j||^2 / (1. + ||s_j||^2) * (s_j / ||s_j||)
+        scale = input_norm_square / (1. + input_norm_square) / tf.sqrt(input_norm_square)
+
+    return cap_input * scale
 
 
 class CapsNet(object):
@@ -109,36 +104,88 @@ class CapsNet(object):
         # cap_ws with shape: [10, num_caps, 8, 16],
         # [8 x 16] for each pair of capsules between two layers
         # u_hat_j|i = W_ij * u_i
-        cap_predicts = tf.scan(lambda ac, x: tf.matmul(tf.tile(x, [10, 1, 1, 1]), cap_ws),
-                               primary_caps, initializer=fn_init, name='cap_predicts')
+        cap_predicts = tf.scan(lambda ac, x: tf.matmul(x, cap_ws),
+                               tf.tile(primary_caps, [1, 10, 1, 1, 1]),
+                               initializer=fn_init, name='cap_predicts')
         # cap_predicts with shape: [None, 10, num_caps, 1, 16]
         cap_predictions = tf.squeeze(cap_predicts, axis=[3])
         # after squeeze with shape: [None, 10, num_caps, 16]
 
         # log prior probabilities
         log_prior = tf.get_variable('log_prior', shape=[10, num_caps], dtype=tf.float32,
-                                    initializer=tf.zeros_initializer())
+                                    initializer=tf.zeros_initializer(),
+                                    trainable=cfg.PRIOR_TRAINING)
         # log_prior with shape: [10, num_caps]
+        # V1. static way
+        if cfg.ROUTING_WAY == 'static':
+            digit_caps = self._dynamic_routingV1(log_prior, cap_predictions)
+        # V2. dynamic way
+        elif cfg.ROUTING_WAY == 'dynamic':
+            digit_caps = self._dynamic_routingV2(log_prior, cap_predictions, num_caps)
+        else:
+            raise NotImplementedError
+
+        return digit_caps
+
+    def _dynamic_routingV2(self, prior, cap_predictions, num_caps):
+        """
+        doing dynamic routing with tf.while_loop
+        :arg
+            proir: log prior for scaling with shape [10, num_caps]
+            cap_prediction: predictions from layer below with shape [None, 10, num_caps, 16]
+            num_caps: num_caps
+        :return
+            digit_caps: digit capsules with shape [None, 10, 16]
+        """
+        # check V1 for implementation details
+        init_cap = tf.reduce_sum(cap_predictions, -2)
+        iters = tf.constant(cfg.ROUTING_ITERS)
+        prior = tf.expand_dims(prior, 0)
+
+        def body(i, prior, cap_out):
+            c = tf.nn.softmax(prior, dim=1)
+            c_expand = tf.expand_dims(c, axis=-1)
+            s_t = tf.multiply(cap_predictions, c_expand)
+            s = tf.reduce_sum(s_t, axis=[2])
+            cap_out = squash(s)
+            delta_prior = tf.reduce_sum(tf.multiply(tf.expand_dims(cap_out, axis=2),
+                                                    cap_predictions),
+                                        axis=[-1])
+            prior = prior + delta_prior
+
+            return [i - 1, prior, cap_out]
+
+        condition = lambda i, proir, cap_out: i > 0
+        _, prior, digit_caps = tf.while_loop(condition, body, [iters, prior, init_cap],
+                                             shape_invariants=[iters.get_shape(),
+                                                               tf.TensorShape([None, 10, num_caps]),
+                                                               init_cap.get_shape()])
+
+        return digit_caps
+
+    def _dynamic_routingV1(self, prior, cap_predictions):
+        """
+        doing dynamic routing with for loop as static implementation
+        :arg
+            proir: log prior for scaling with shape [10, num_caps]
+            cap_prediction: predictions from layer below with shape [None, 10, num_caps, 16]
+        :return
+            digit_caps: digit capsules with shape [None, 10, 16]
+        """
+        prior = tf.expand_dims(prior, 0)
+        # prior shape: [1, 10, num_caps]
         for idx in xrange(cfg.ROUTING_ITERS):
             with tf.name_scope('routing_%s' % idx):
-                # the first iteration
-                if idx == 0:
-                    c = tf.nn.softmax(log_prior, dim=0)
-                    # c shape: [10, num_caps]
-                    c_t = tf.expand_dims(c, axis=2)
-                    # c_t shape: [10, num_caps, 1]
-                # iterations > 1
-                else:
-                    # [None, 10, num_caps]
-                    c = tf.nn.softmax(log_prior, dim=1)
-                    # [None, 10, num_caps, 1]
-                    c_t = tf.expand_dims(c, axis=3)
+
+                c = tf.nn.softmax(prior, dim=1)
+                # c shape: [1, 10, num_caps]
+                c_t = tf.expand_dims(c, axis=-1)
+                # c_t shape: [1, 10, num_caps, 1]
 
                 s_t = tf.multiply(cap_predictions, c_t)
                 # s_t shape: [None, 10, num_caps, 16]
                 # for each capsule in the layer after, add all the weighted capsules to get
                 # the capsule input for it.
-
                 # s_j = Sum_i (c_ij u_hat_j|i)
                 s = tf.reduce_sum(s_t, axis=[2])
 
@@ -152,8 +199,9 @@ class CapsNet(object):
                                             axis=[-1])
                 # delta_prior shape: [None, 10, num_caps]
 
-                log_prior = log_prior + delta_prior
+                prior = prior + delta_prior
 
+        # shape [None, 10, 16]
         return digit_caps
 
     def _reconstruct(self, digit_caps):
@@ -205,31 +253,34 @@ class CapsNet(object):
             # [None, 10 , 1]
             # y_ = tf.expand_dims(self._y_, axis=2)
             self._digit_caps_norm = tf.norm(digit_caps, ord=2, axis=2,
-                                      name='digit_caps_norm')
+                                            name='digit_caps_norm')
             # digit_caps_norm shape: [None, 10]
             # loss of positive classes
             # max(0, m+ - ||v_c||) ^ 2
-            pos_loss = tf.maximum(0., cfg.M_POS - tf.reduce_sum(self._digit_caps_norm * self._y_,
-                                                                axis=1), name='pos_max')
-            pos_loss = tf.square(pos_loss, name='pos_square')
-            pos_loss = tf.reduce_mean(pos_loss)
+            with tf.name_scope('pos_loss'):
+                pos_loss = tf.maximum(0., cfg.M_POS - tf.reduce_sum(self._digit_caps_norm * self._y_,
+                                                                    axis=1), name='pos_max')
+                pos_loss = tf.square(pos_loss, name='pos_square')
+                pos_loss = tf.reduce_mean(pos_loss)
             tf.summary.scalar('pos_loss', pos_loss)
             # pos_loss shape: [None, ]
 
             # get index of negative classes
             y_negs = 1. - self._y_
             # max(0, ||v_c|| - m-) ^ 2
-            neg_loss = tf.maximum(0., tf.reduce_sum(self._digit_caps_norm * y_negs,
-                                                    axis=1) - cfg.M_NEG)
-            neg_loss = tf.square(neg_loss) * cfg.LAMBDA
-            neg_loss = tf.reduce_mean(neg_loss)
+            with tf.name_scope('neg_loss'):
+                neg_loss = tf.maximum(0., self._digit_caps_norm * y_negs - cfg.M_NEG)
+                neg_loss = tf.reduce_sum(tf.square(neg_loss), axis=-1) * cfg.LAMBDA
+                neg_loss = tf.reduce_mean(neg_loss)
             tf.summary.scalar('neg_loss', neg_loss)
             # neg_loss shape: [None, ]
 
             reconstruct = self._reconstruct(digit_caps)
 
             # loss of reconstruction
-            reconstruct_loss = tf.nn.l2_loss(self._x - reconstruct, name='l2_loss') * 2.
+            with tf.name_scope('l2_loss'):
+                reconstruct_loss = tf.reduce_sum(tf.square(self._x - reconstruct), axis=-1)
+                reconstruct_loss = tf.reduce_mean(reconstruct_loss)
             tf.summary.scalar('reconstruct_loss', reconstruct_loss)
 
             total_loss = pos_loss + neg_loss + \
@@ -311,7 +362,16 @@ class CapsNet(object):
 
         # build up primary capsules
         with tf.variable_scope('PrimaryCaps'):
+
+            # update dim of capsule grid
+            self._dim = (self._dim - 9) // 2 + 1
+            # number of primary caps: 6x6x32 = 1152
+            self._num_caps.append(self._dim ** 2 * cfg.PRIMARY_CAPS_CHANNELS)
+            assert self._dim == 6, "dims for primary caps grid should be 6x6."
+
             # build up PriamryCaps with 32 channels and 8-D vector
+            # 1. dummy solution
+            '''
             caps = []
             for idx in xrange(cfg.PRIMARY_CAPS_CHANNELS):
                 # get a capsule with 8-D
@@ -322,22 +382,20 @@ class CapsNet(object):
             # concat all the primary capsules
             primary_caps = tf.concat(caps, axis=1)
             # primary_caps with shape: [None, 32, 6, 6, 8]
-
-            # update dim of capsule grid
-            self._dim = (self._dim - 9) // 2 + 1
-            # number of primary caps: 6x6x32 = 1152
-            self._num_caps.append(self._dim ** 2 * cfg.PRIMARY_CAPS_CHANNELS)
-            assert self._dim == 6, "dims for primary caps grid should be 6x6."
-
             with tf.name_scope('primary_cap_reshape'):
                 # reshape and expand dims for broadcasting in dynamic routing
-                primary_caps_reshape = tf.reshape(primary_caps,
+                primary_caps = tf.reshape(primary_caps,
                                                   shape=[-1, 1, self._num_caps[1], 1, 8])
-                # primary_caps_reshape with shape: [None, 1, 1152, 1, 8]
+                # primary_caps with shape: [None, 1, 1152, 1, 8]
+            '''
+            # 2. faster one
+            primary_caps = slim.conv2d(conv1, 32*8, 9, 2, padding='VALID', activation_fn=None)
+            primary_caps = tf.reshape(primary_caps, [-1, 1, self._num_caps[1], 1, 8])
+            primary_caps = squash(primary_caps)
 
         # dynamic routing
         with tf.variable_scope("digit_caps"):
-            self._digit_caps = self._dynamic_routing(primary_caps_reshape, 1)
+            self._digit_caps = self._dynamic_routing(primary_caps, 1)
 
         # set up losses
         self._loss = self._add_loss(self._digit_caps)
@@ -378,7 +436,7 @@ class CapsNet(object):
             self.test(sess)
 
     def snapshot(self, sess, iters=0):
-        save_path = cfg.TRAIN_DIR +'/capsnet'
+        save_path = cfg.TRAIN_DIR + '/capsnet'
         self.saver.save(sess, save_path, iters)
 
     def test(self, sess, set='validation'):

@@ -19,6 +19,9 @@ __C.PRIMARY_CAPS_CHANNELS = 32
 # iterations of dynamic routing
 __C.ROUTING_ITERS = 3
 
+# way to do dynamic iteration 'static' 'dynamic'
+__C.ROUTING_WAY = 'dynamic'
+
 # constant m+ in margin loss
 __C.M_POS = 0.9
 
@@ -47,16 +50,22 @@ __C.USE_BIAS = True
 __C.PRINT_EVERY = 10
 
 # snapshot every x iterations
-__C.SAVE_EVERY = 1000
+__C.SAVE_EVERY = 500
 
 # number of training iterations
 __C.MAX_ITERS = 5000
 
+# training mode
+__C.PRIOR_TRAINING = False
+
+# use ckpt to continue training
+__C.USE_CKPT = False
+
 # directory for saving data
-__C.DATA_DIR = './data'
+__C.DATA_DIR = '../data'
 
 # directory for saving check points
-__C.TRAIN_DIR = './output'
+__C.TRAIN_DIR = '../output/output_test'
 
 # direcotry for saving tensorboard files
-__C.TB_DIR = './tensorboard_'
+__C.TB_DIR = '../output/tensorboard_test'
