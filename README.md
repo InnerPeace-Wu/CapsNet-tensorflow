@@ -6,7 +6,7 @@ Note: this implementation strictly follow the instructions of the paper, check t
 ## Dependencies
 
 * Codes are tested on `tensorflow 1.3`, and `python 2.7`. But it should be compatible with `python 3.x`
-* Other dependencies as follows, install it by running `pip install -r requirements.txt` in `ROOT` directory.
+* Other dependencies as follows, 
 
 ```
 numpy>=1.7.1
@@ -14,6 +14,14 @@ scipy>=0.13.2
 easydict>=1.6
 tqdm>=4.17.1
 ```
+install by running 
+
+```bash
+$ pip install -r requirements.txt
+``` 
+in `ROOT` directory.
+
+
 
 ## Train
 
@@ -25,7 +33,15 @@ cd $ROOT
 python train.py
 ```
 
-NOTE: First try with `50` iterations, it got `69.91%` accuracy on test set.
+## Experiments
+
+1. current commit. With several bugs about to fix.
+
+Iterations | 2k     | 4k    | 5k    | 7k    | 9k    | 10k   
+:---------:|:------:|:-----:|:-----:|:-----:|:-----:|:-----:
+  val_acc  | 98.02  | 98.58 |  -    | 98.82 | 98.96 | -
+  test_acc |   -    |   -   | 98.89 |   -   |   -   | 99.09 
+
 
 ## TODO
 - [ ] report exclusive experiment results

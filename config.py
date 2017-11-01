@@ -59,4 +59,4 @@ __C.DATA_DIR = './data'
 __C.TRAIN_DIR = './output'
 
 # direcotry for saving tensorboard files
-__C.TB_DIR = './tensorboard'
+__C.TB_DIR = './tensorboard_'
