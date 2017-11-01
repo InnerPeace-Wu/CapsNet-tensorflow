@@ -3,6 +3,15 @@ reference: [Dynamic routing between capsules](https://arxiv.org/abs/1710.09829v1
 
 Note: this implementation strictly follow the instructions of the paper, check the paper for details.
 
+## Takeaways
+
+**The key of the paper is not how accurate the `CapsNet` is, but the `novel idea of 
+representation of image with capsule`**.
+
+* The less accurate may due to the missing `3M` parameters.(My implementaion with 8M 
+compared to 11M referred in the paper.)
+* About to do some `representation` experiment with the latest training result.
+
 ## Dependencies
 
 * Codes are tested on `tensorflow 1.3`, and `python 2.7`. But it should be compatible with `python 3.x`
@@ -29,11 +38,12 @@ in `ROOT` directory.
 * then 
 
 ```bash
-cd $ROOT/code
-python train.py
+$ cd $ROOT/code
+$ python train.py
 ```
-or train with logs by runing:(not tested yet)
+or train with logs by runing:
 ```bash
+$ cd $ROOT/code
 $ bash train.sh
 ```
 
@@ -50,8 +60,8 @@ latest commit with `3 iterations of dynamic routing`:
 
 Iterations | 1k     | 2k    | 3k    | 4k    | 5k    
 :---------:|:------:|:-----:|:-----:|:-----:|:-----:
-  val_acc  | 98.90  | 99.16 | 99.09 | 99.30 | - 
-  test_acc |   -    |   -   | -     |   -   |   -   
+  val_acc  | 98.90  | 99.16 | 99.09 | 99.30 | 99.24
+  test_acc |   -    |   -   | -     |   -   |  99.21 
 
 commit [8e3785d](https://github.com/InnerPeace-Wu/CapsNet-tensorflow/tree/8e3785d5b6f34c13c81555edd97a6241a7885209). 
 

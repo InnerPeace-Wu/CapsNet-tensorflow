@@ -59,7 +59,7 @@ __C.MAX_ITERS = 5000
 __C.PRIOR_TRAINING = False
 
 # use ckpt to continue training
-__C.USE_CKPT = False
+__C.USE_CKPT = True
 
 # directory for saving data
 __C.DATA_DIR = '../data'

@@ -52,8 +52,8 @@ def main(_):
             sess.run(tf.global_variables_initializer())
             print('Num params: %d' % sum(v.get_shape().num_elements()
                                          for v in tf.trainable_variables()))
-        # test
-        # caps_net.test(sess, 'test')
+        # for test
+        # caps_net.test(sess, 'validation')
         # exit()
 
         caps_net.train_writer.add_graph(sess.graph)
