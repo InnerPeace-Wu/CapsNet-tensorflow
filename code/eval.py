@@ -16,7 +16,7 @@ from config import cfg
 from six.moves import xrange
 from tensorflow.examples.tutorials.mnist import input_data
 
-from CapsNet import CapsNet
+from code.CapsNet import CapsNet
 
 FLAGS = None
 
@@ -42,34 +42,14 @@ def main(_):
 
     train_dir = cfg.TRAIN_DIR
     ckpt = tf.train.get_checkpoint_state(train_dir)
+    if not ckpt:
+        print('no checkpoint be found')
 
     with tf.Session(config=config) as sess:
-        if ckpt and cfg.USE_CKPT:
-            print("Reading parameters from %s" % ckpt.model_checkpoint_path)
-            caps_net.saver.restore(sess, ckpt.model_checkpoint_path)
-        else:
-            print('Created model with fresh paramters.')
-            sess.run(tf.global_variables_initializer())
-            print('Num params: %d' % sum(v.get_shape().num_elements()
-                                         for v in tf.trainable_variables()))
-        # for test
-        caps_net.test(sess, 'test')
-        exit()
-
-        caps_net.train_writer.add_graph(sess.graph)
-        iters = 0
-        tic = time.time()
-        for iters in xrange(cfg.MAX_ITERS):
-            sys.stdout.write('>>> %d / %d \r' % (iters % cfg.PRINT_EVERY, cfg.PRINT_EVERY))
-            sys.stdout.flush()
-            caps_net.train_with_summary(sess, batch_size=100, iters=iters)
-            if iters % cfg.PRINT_EVERY == 0 and iters > 0:
-                toc = time.time()
-                print('average time: %.2f secs' % (toc - tic))
-                tic = time.time()
-
-        caps_net.snapshot(sess, iters)
-        caps_net.test(sess, 'test')
+        print("Reading parameters from %s" % ckpt.model_checkpoint_path)
+        caps_net.saver.restore(sess, ckpt.model_checkpoint_path)
+        for i in xrange(2000 // 30):
+            caps_net.eval_reconstuct(sess, 30)
 
 
 if __name__ == '__main__':

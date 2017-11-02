@@ -7,7 +7,7 @@ export PYTHONUNBUFFERED="True"
 
 TAG='log'
 
-LOG="${TAG}.txt.`date +'%Y-%m-%d_%H-%M-%S'`"
+LOG="./logs/${TAG}.txt.`date +'%Y-%m-%d_%H-%M-%S'`"
 exec &> >(tee -a "$LOG")
 echo Logging output to "$LOG"
 

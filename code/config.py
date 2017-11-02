@@ -38,10 +38,10 @@ __C.RECONSTRUCT_W = 0.0005
 __C.LR = 0.001
 
 # learning rate decay step size
-__C.STEP_SIZE = 500
+__C.STEP_SIZE = 1000
 
 # learning rate decay ratio
-__C.DECAY_RATIO = 0.96
+__C.DECAY_RATIO = 0.7
 
 # choose use bias during conv operations
 __C.USE_BIAS = True
@@ -65,7 +65,7 @@ __C.USE_CKPT = True
 __C.DATA_DIR = '../data'
 
 # directory for saving check points
-__C.TRAIN_DIR = '../output/output_test'
+__C.TRAIN_DIR = '../output/output'
 
 # direcotry for saving tensorboard files
-__C.TB_DIR = '../output/tensorboard_test'
+__C.TB_DIR = '../output/tensorboard'

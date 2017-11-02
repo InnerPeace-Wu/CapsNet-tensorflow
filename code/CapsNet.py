@@ -6,11 +6,13 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import time
 import numpy as np
 import tensorflow as tf
 from six.moves import xrange
 from tensorflow.contrib import slim
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 from config import cfg
 
@@ -46,6 +48,8 @@ class CapsNet(object):
         # store number of capsules of each capsule layer
         # the conv1-layer has 0 capsules
         self._num_caps = [0]
+
+        self._bad_example = 0
 
     def _capsule(self, input, i_c, o_c, idx):
         """
@@ -176,7 +180,6 @@ class CapsNet(object):
         # prior shape: [1, 10, num_caps]
         for idx in xrange(cfg.ROUTING_ITERS):
             with tf.name_scope('routing_%s' % idx):
-
                 c = tf.nn.softmax(prior, dim=1)
                 # c shape: [1, 10, num_caps]
                 c_t = tf.expand_dims(c, axis=-1)
@@ -239,6 +242,7 @@ class CapsNet(object):
             out = tf.sigmoid(fc)
             # out with shape [None, 784]
 
+            self._rescon_img = out
             return out
 
     def _add_loss(self, digit_caps):
@@ -389,7 +393,7 @@ class CapsNet(object):
                 # primary_caps with shape: [None, 1, 1152, 1, 8]
             '''
             # 2. faster one
-            primary_caps = slim.conv2d(conv1, 32*8, 9, 2, padding='VALID', activation_fn=None)
+            primary_caps = slim.conv2d(conv1, 32 * 8, 9, 2, padding='VALID', activation_fn=None)
             primary_caps = tf.reshape(primary_caps, [-1, 1, self._num_caps[1], 1, 8])
             primary_caps = squash(primary_caps)
 
@@ -403,20 +407,22 @@ class CapsNet(object):
     def _accuracy(self):
         with tf.name_scope('accuracy'):
             # digit_caps_norm = tf.norm(self._digit_caps, ord=2, axis=-1)
+            self._py = tf.argmax(self._digit_caps_norm, 1)
             correct_prediction = tf.equal(tf.argmax(self._y_, 1),
-                                          tf.argmax(self._digit_caps_norm, 1))
+                                          self._py)
             correct_prediction = tf.cast(correct_prediction, tf.float32)
             self.accuracy = tf.reduce_mean(correct_prediction)
             tf.summary.scalar('accuracy', self.accuracy)
 
     def train_with_summary(self, sess, batch_size=100, iters=0):
         batch = self._mnist.train.next_batch(batch_size)
-        loss, _, train_acc, train_summary = sess.run([self._loss, self._train_op,
-                                                      self.accuracy, self._summary_op],
-                                                     feed_dict={self._x: batch[0],
-                                                                self._y_: batch[1]})
+        loss, _ = sess.run([self._loss, self._train_op],
+                           feed_dict={self._x: batch[0],
+                                      self._y_: batch[1]})
         if iters % cfg.PRINT_EVERY == 0 and iters > 0:
-            val_batch = self._mnist.validation.next_batch(batch_size)
+            train_acc, train_summary = sess.run([self.accuracy, self._summary_op],
+                                               feed_dict={self._x: batch[0],
+                                                          self._y_: batch[1]})
 
             self.train_writer.add_summary(train_summary, iters)
             self.train_writer.flush()
@@ -424,6 +430,7 @@ class CapsNet(object):
             print("iters: %d / %d, loss ==> %.4f " % (iters, cfg.MAX_ITERS, loss))
             print('train accuracy: %.4f' % train_acc)
 
+            val_batch = self._mnist.validation.next_batch(batch_size)
             test_acc, test_summary = sess.run([self.accuracy, self._summary_op],
                                               feed_dict={self._x: val_batch[0],
                                                          self._y_: val_batch[1]})
@@ -440,6 +447,7 @@ class CapsNet(object):
         self.saver.save(sess, save_path, iters)
 
     def test(self, sess, set='validation'):
+        tic = time.time()
         if set == 'test':
             x = self._mnist.test.images
             y_ = self._mnist.test.labels
@@ -455,4 +463,45 @@ class CapsNet(object):
                                      self._y_: y_i})
             acc.append(ac)
         all_ac = np.mean(np.array(acc))
-        print("whole {} accuracy: {}".format(set, all_ac))
+        t = time.time() - tic
+        print("whole {} accuracy: {}, with time: {:.2f} secs".format(set, all_ac, t))
+
+    def eval_reconstuct(self, sess=None, batch_size=10):
+        """do image reconstruction and representations"""
+        data = self._mnist.test.next_batch(batch_size)
+        ori_img = np.array(data[0])
+        label = np.argmax(np.array(data[1]), axis=1)
+        res_img, res_label, acc = sess.run([self._rescon_img, self._py, self.accuracy], feed_dict={self._x: data[0],
+                                                        self._y_: data[1]})
+        if acc < 1:
+            ori_img = np.reshape(ori_img, [batch_size, 28, 28])
+            res_img = np.reshape(res_img, [batch_size, 28, 28])
+            num_rows = int(np.ceil(batch_size / 10))
+            fig, _ = plt.subplots(nrows=2*num_rows, ncols=10, figsize=(10, 7))
+            for r in xrange(num_rows):
+                for i in xrange(10):
+                    idx = i + r * 10
+                    if idx == batch_size:
+                        break
+                    plt.subplot(2 * num_rows, 10, idx + 1 + 10 * r)
+                    imshow_noax(ori_img[idx], True)
+                    # plt.ylabel(label[idx])
+                    plt.title(label[idx])
+                    plt.subplot(2 * num_rows, 10, idx + 11 + 10 * r)
+                    imshow_noax(res_img[idx])
+                    plt.title(res_label[idx])
+                    # plt.axis('off')
+
+            # fig.tight_layout()
+            # plt.show()
+            self._bad_example += 1
+            plt.savefig('./figs/%s.png' % self._bad_example, dpi=200)
+
+
+def imshow_noax(img, nomalize=True):
+    if nomalize:
+        img_max, img_min = np.max(img), np.min(img)
+        img = 255. * (img - img_min) / (img_max - img_min)
+
+    plt.imshow(img.astype('uint8'))
+    plt.gca().axis('off')
