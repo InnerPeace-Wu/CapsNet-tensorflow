@@ -35,7 +35,11 @@ def main(_):
 
     # Create the model
     caps_net = CapsNet(mnist)
-    caps_net.creat_architecture()
+    # caps_net.creat_architecture()
+
+    # caps_net.eval_arch()
+
+    caps_net.adversarial_arch()
 
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -48,8 +52,13 @@ def main(_):
     with tf.Session(config=config) as sess:
         print("Reading parameters from %s" % ckpt.model_checkpoint_path)
         caps_net.saver.restore(sess, ckpt.model_checkpoint_path)
-        for i in xrange(2000 // 30):
-            caps_net.eval_reconstuct(sess, 30)
+        for i in xrange(10):
+            for j in xrange(10):
+                if i == j:
+                    continue
+                caps_net.adversarial_test(sess, ori_num=j, target_num=i)
+            # caps_net.eval_reconstuct(sess, 30)
+            # caps_net.dim_representation(sess, i)
 
 
 if __name__ == '__main__':

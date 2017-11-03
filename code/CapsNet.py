@@ -14,52 +14,26 @@ from tensorflow.contrib import slim
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
+from utils import squash, imshow_noax, tweak_matrix
 from config import cfg
 
 
-def squash(cap_input):
-    """
-    squash function for keep the length of capsules between 0 - 1
-    :arg
-        cap_input: total input of capsules,
-                   with shape: [None, h, w, c] or [None, n, d]
-    :return
-        cap_output: output of each capsules, which has the shape as cap_input
-    """
-
-    with tf.name_scope('squash'):
-        # compute norm square of inputs with the last axis, keep dims for broadcasting
-        # ||s_j||^2 in paper
-        input_norm_square = tf.reduce_sum(tf.square(cap_input), axis=-1, keep_dims=True)
-
-        # ||s_j||^2 / (1. + ||s_j||^2) * (s_j / ||s_j||)
-        scale = input_norm_square / (1. + input_norm_square) / tf.sqrt(input_norm_square)
-
-    return cap_input * scale
-
-
 class CapsNet(object):
-    def __init__(self, mnist):
+    def __init__(self):
         """initial class with mnist dataset"""
-        self._mnist = mnist
-
         # keep tracking of the dimension of feature maps
         self._dim = 28
         # store number of capsules of each capsule layer
         # the conv1-layer has 0 capsules
         self._num_caps = [0]
-
-        self._bad_example = 0
-
+        # set for counting
+        self._count = 0
         # set up placeholder of input data and labels
         self._x = tf.placeholder(tf.float32, [None, 784])
         self._y_ = tf.placeholder(tf.float32, [None, 10])
-
         # set up initializer for weights and bias
         self._w_initializer = tf.truncated_normal_initializer(stddev=0.1)
         self._b_initializer = tf.zeros_initializer()
-
-        self._tweak_range = np.arange(-25, 26, 5) / 100.
 
     def _capsule(self, input, i_c, o_c, idx):
         """
@@ -151,6 +125,7 @@ class CapsNet(object):
         :return
             digit_caps: digit capsules with shape [None, 10, 16]
         """
+        # see issue for more info: https://github.com/XifengGuo/CapsNet-Keras/issues/1
         # check V1 for implementation details
         init_cap = tf.reduce_sum(cap_predictions, -2)
         iters = tf.constant(cfg.ROUTING_ITERS)
@@ -241,7 +216,7 @@ class CapsNet(object):
             self._recons_img = out
             return out
 
-    def _add_loss(self, digit_caps):
+    def _add_loss(self):
         """
         add the margin loss and reconstruction loss
         :arg
@@ -252,9 +227,7 @@ class CapsNet(object):
         with tf.name_scope('loss'):
             # [None, 10 , 1]
             # y_ = tf.expand_dims(self._y_, axis=2)
-            self._digit_caps_norm = tf.norm(digit_caps, ord=2, axis=2,
-                                            name='digit_caps_norm')
-            # digit_caps_norm shape: [None, 10]
+
             # loss of positive classes
             # max(0, m+ - ||v_c||) ^ 2
             with tf.name_scope('pos_loss'):
@@ -283,7 +256,7 @@ class CapsNet(object):
             # y_ shape: [None, 10, 1]
 
             # for method 1.
-            target_cap = y_ * digit_caps
+            target_cap = y_ * self._digit_caps
             # target_cap shape: [None, 10, 16]
             target_cap = tf.reduce_sum(target_cap, axis=1)
             # target_cap: [None, 16]
@@ -306,16 +279,15 @@ class CapsNet(object):
 
         return total_loss
 
-    def creat_architecture(self):
+    def train_architecture(self):
         """creat architecture of the whole network"""
-
 
         with tf.variable_scope('CapsNet', initializer=self._w_initializer):
             # build net
             self._build_net()
 
             # set up losses
-            self._loss = self._add_loss(self._digit_caps)
+            self._loss = self._add_loss()
 
             # set up exponentially decay learning rate
             self._global_step = tf.Variable(0, trainable=False)
@@ -333,8 +305,9 @@ class CapsNet(object):
                                                              global_step=self._global_step)
             # set up accuracy ops
             self._accuracy()
+            # set up summary op
             self._summary_op = tf.summary.merge_all()
-
+            # create a saver
             self.saver = tf.train.Saver()
 
             # set up summary writer
@@ -410,7 +383,12 @@ class CapsNet(object):
         with tf.variable_scope("digit_caps"):
             self._digit_caps = self._dynamic_routing(primary_caps, 1)
 
+            self._digit_caps_norm = tf.norm(self._digit_caps, ord=2, axis=2,
+                                            name='digit_caps_norm')
+            # digit_caps_norm shape: [None, 10]
+
     def _accuracy(self):
+        """set up accuracy"""
         with tf.name_scope('accuracy'):
             # digit_caps_norm = tf.norm(self._digit_caps, ord=2, axis=-1)
             self._py = tf.argmax(self._digit_caps_norm, 1)
@@ -420,70 +398,72 @@ class CapsNet(object):
             self.accuracy = tf.reduce_mean(correct_prediction)
             tf.summary.scalar('accuracy', self.accuracy)
 
-    def train_with_summary(self, sess, batch_size=100, iters=0):
-        batch = self._mnist.train.next_batch(batch_size)
+    def get_summary(self, sess, data):
+        """get training summary"""
+
+        acc, summary = sess.run([self.accuracy, self._summary_op],
+                                feed_dict={self._x: data[0],
+                                           self._y_: data[1]})
+
+        return acc, summary
+
+    def train(self, sess, data):
+        """training process
+        :arg
+            data: (images, labels)
+        """
         loss, _ = sess.run([self._loss, self._train_op],
-                           feed_dict={self._x: batch[0],
-                                      self._y_: batch[1]})
-        if iters % cfg.PRINT_EVERY == 0 and iters > 0:
-            train_acc, train_summary = sess.run([self.accuracy, self._summary_op],
-                                               feed_dict={self._x: batch[0],
-                                                          self._y_: batch[1]})
+                           feed_dict={self._x: data[0],
+                                      self._y_: data[1]})
 
-            self.train_writer.add_summary(train_summary, iters)
-            self.train_writer.flush()
+        return loss
 
-            print("iters: %d / %d, loss ==> %.4f " % (iters, cfg.MAX_ITERS, loss))
-            print('train accuracy: %.4f' % train_acc)
+    def snapshot(self, sess, iters):
+        """save checkpoint"""
 
-            val_batch = self._mnist.validation.next_batch(batch_size)
-            test_acc, test_summary = sess.run([self.accuracy, self._summary_op],
-                                              feed_dict={self._x: val_batch[0],
-                                                         self._y_: val_batch[1]})
-            print('val   accuracy: %.4f' % test_acc)
-            self.val_writer.add_summary(test_summary, iters)
-            self.val_writer.flush()
-
-        if iters % cfg.SAVE_EVERY == 0 and iters > 0:
-            self.snapshot(sess, iters=iters)
-            self.test(sess)
-
-    def snapshot(self, sess, iters=0):
         save_path = cfg.TRAIN_DIR + '/capsnet'
         self.saver.save(sess, save_path, iters)
 
-    def test(self, sess, set='validation'):
+    def test(self, sess, mnist, set='validation'):
+        """test trained model on specific dataset split"""
         tic = time.time()
         if set == 'test':
-            x = self._mnist.test.images
-            y_ = self._mnist.test.labels
+            x = mnist.test.images
+            y_ = mnist.test.labels
+        elif set == 'validation':
+            x = mnist.validation.images
+            y_ = mnist.validation.labels
+        elif set == 'train':
+            x = mnist.train.images
+            y_ = mnist.train.labels
         else:
-            x = self._mnist.validation.images
-            y_ = self._mnist.validation.labels
+            raise ValueError
+
         acc = []
         for i in tqdm(xrange(len(x) // 100), desc="calculating %s accuracy" % set):
             x_i = x[i * 100: (i + 1) * 100]
             y_i = y_[i * 100: (i + 1) * 100]
             ac = sess.run(self.accuracy,
-                          feed_dict={self._x: x_i,
-                                     self._y_: y_i})
+                          feed_dict={self._x: x_i, self._y_: y_i})
             acc.append(ac)
+
         all_ac = np.mean(np.array(acc))
         t = time.time() - tic
-        print("whole {} accuracy: {}, with time: {:.2f} secs".format(set, all_ac, t))
+        print("{} set accuracy: {}, with time: {:.2f} secs".format(set, all_ac, t))
 
     def eval_reconstuct(self, sess=None, batch_size=10):
         """do image reconstruction and representations"""
         data = self._mnist.test.next_batch(batch_size)
         ori_img = np.array(data[0])
         label = np.argmax(np.array(data[1]), axis=1)
-        res_img, res_label, acc = sess.run([self._recons_img, self._py, self.accuracy], feed_dict={self._x: data[0],
-                                                        self._y_: data[1]})
+        res_img, res_label, acc, norms = sess.run([self._recons_img, self._py, self.accuracy,
+                                                   self._digit_caps_norm], feed_dict={self._x: data[0],
+                                                                                      self._y_: data[1]})
         if acc < 1:
             ori_img = np.reshape(ori_img, [batch_size, 28, 28])
             res_img = np.reshape(res_img, [batch_size, 28, 28])
             num_rows = int(np.ceil(batch_size / 10))
-            fig, _ = plt.subplots(nrows=2*num_rows, ncols=10, figsize=(10, 7))
+            fig, _ = plt.subplots(nrows=2 * num_rows, ncols=10, figsize=(10, 7))
             for r in xrange(num_rows):
                 for i in xrange(10):
                     idx = i + r * 10
@@ -495,47 +475,106 @@ class CapsNet(object):
                     plt.title(label[idx])
                     plt.subplot(2 * num_rows, 10, idx + 11 + 10 * r)
                     imshow_noax(res_img[idx])
-                    plt.title(res_label[idx])
+                    plt.title("%s_%.3f" % (res_label[idx], norms[idx][res_label[idx]]))
                     # plt.axis('off')
 
             # fig.tight_layout()
             # plt.show()
-            self._bad_example += 1
-            plt.savefig('./figs/%s.png' % self._bad_example, dpi=200)
+            self._count += 1
+            plt.savefig('./figs/rc_exp_%s.png' % self._count, dpi=200)
 
     def eval_arch(self):
         """evaluation architecture"""
-        self._build_net()
-        y_expand = tf.expand_dims(self._y_, axis=2)
-        target_cap = tf.multiply(self._digit_caps, y_expand)
-        # [None, 1, 16]
-        target_cap = tf.reduce_sum(target_cap, axis=1, keep_dims=True)
-        # [None, 11, 16]
-        caps = target_cap + self._tweak_range[:, None]
-        self._reconstruct(tf.reshape(caps, [-1, 16]))
-        # self._recons_img = tf.transpose(tf.reshape(recons_img, [-1, 11, 16]), [0, 2, 1])
+        with tf.variable_scope('CapsNet', initializer=self._w_initializer):
+            self._build_net()
+            y_expand = tf.expand_dims(self._y_, axis=2)
+            target_cap = tf.multiply(self._digit_caps, y_expand)
+            # [None, 1, 16]
+            target_cap = tf.reduce_sum(target_cap, axis=1, keep_dims=True)
+            # [None, 176, 16]
+            caps = target_cap + tweak_matrix()
+            self._reconstruct(tf.reshape(caps, [-1, 16]))
 
-    def dim_representation(self, sess):
-        data = self._mnist.test.next_batch(1)
+            self.saver = tf.train.Saver()
+
+            # self._recons_img = tf.transpose(tf.reshape(recons_img, [-1, 11, 16]), [0, 2, 1])
+
+    def dim_representation(self, sess, i):
+        label = [None]
+        while label[0] != i:
+            data = self._mnist.test.next_batch(1)
+            label = np.argmax(np.array(data[1]), axis=1)
         res_img = sess.run(self._recons_img, feed_dict={self._x: data[0],
                                                         self._y_: data[1]})
         res_img = np.reshape(res_img, [-1, 28, 28])
 
-        fig, _ = plt.subplots(nrows=16, ncols=11, figsize=(10, 7))
+        fig, _ = plt.subplots(nrows=11, ncols=16, figsize=(10, 7))
         for i in xrange(11):
             for j in xrange(16):
-                idx = j + i * 11
-                plt_idx = j * 11 + i + 1
-                plt.subplot(16, 11, plt_idx)
+                idx = j + i * 16
+                # plt_idx = j * 11 + i + 1
+                plt.subplot(11, 16, idx + 1)
                 imshow_noax(res_img[idx])
 
-        plt.show()
+        # plt.show()
+        plt.savefig('./figs/dr_exp_%s.png' % self._count, dpi=200)
+        self._count += 1
+
+    def adversarial_arch(self):
+        with tf.variable_scope('CapsNet', initializer=self._w_initializer):
+            self._build_net()
+
+            self._digit_caps_norm = tf.norm(self._digit_caps, ord=2, axis=2,
+                                            name='digit_caps_norm')
+            # digit_caps_norm shape: [None, 10]
+            # optimizer = tf.train.AdamOptimizer()
+
+            self._adver_loss = tf.reduce_sum(self._digit_caps_norm * self._y_)
+            grads = tf.gradients(self._adver_loss, self._x)
+            self._adver_graidents = grads / tf.norm(grads)
+            self._adver_graidents_norm = tf.norm(grads)
+
+            self._py = tf.argmax(self._digit_caps_norm, 1)
+
+            self.saver = tf.train.Saver()
+
+    def adversarial_test(self, sess, ori_num, target_num, lamb=1):
+        """advertisal test"""
+        label = [None]
+        while label[0] != ori_num:
+            data = self._mnist.test.next_batch(1)
+            label = np.argmax(np.array(data[1]), axis=1)
+        count = 0
+        ori_img = np.reshape(data[0], [-1, 28, 28])
+        x = data[0].copy()
+        py = None
+
+        tar_oh = np.zeros(10, dtype=np.float32)
+        tar_oh[target_num] = 1
+        while py != target_num:
+            grads, py, norm = sess.run([self._adver_graidents, self._py, self._adver_graidents_norm],
+                                       feed_dict={self._x: x,
+                                                  self._y_: tar_oh[None, :]})
+            x += lamb * grads[0]
+            count += 1
+            print("predict: {}, count: {}".format(py, count))
+            print("diff: {}".format(np.sum((x - data[0]))))
+
+        x = np.reshape(x, [-1, 28, 28])
+
+        plt.subplot(1, 3, 1)
+        imshow_noax(ori_img[0])
+        plt.title('orignal: %s' % label[0])
+        plt.subplot(1, 3, 2)
+        imshow_noax(x[0])
+        plt.title('adversarial: %s' % target_num)
+        plt.subplot(1, 3, 3)
+        imshow_noax((x[0] - ori_img[0]) * 100)
+        plt.title('difference(normalized)')
+
+        plt.savefig('./figs/adversarial/advert_%s_to_%s' % (label[0], target_num))
+        # plt.show()
 
 
-def imshow_noax(img, nomalize=True):
-    if nomalize:
-        img_max, img_min = np.max(img), np.min(img)
-        img = 255. * (img - img_min) / (img_max - img_min)
-
-    plt.imshow(img.astype('uint8'), cmap='gray')
-    plt.gca().axis('off')
+if __name__ == '__main__':
+    tweak_matrix()
