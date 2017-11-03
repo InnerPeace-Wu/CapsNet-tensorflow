@@ -7,6 +7,7 @@ from __future__ import division
 from __future__ import print_function
 
 import time
+import os
 import numpy as np
 import tensorflow as tf
 from six.moves import xrange
@@ -451,14 +452,14 @@ class CapsNet(object):
         t = time.time() - tic
         print("{} set accuracy: {}, with time: {:.2f} secs".format(set, all_ac, t))
 
-    def eval_reconstuct(self, sess=None, batch_size=10):
+    def eval_reconstuct(self, sess, x, y, batch_size, save_path):
         """do image reconstruction and representations"""
-        data = self._mnist.test.next_batch(batch_size)
-        ori_img = np.array(data[0])
-        label = np.argmax(np.array(data[1]), axis=1)
+        ori_img = x
+        label = np.argmax(y, axis=1)
         res_img, res_label, acc, norms = sess.run([self._recons_img, self._py, self.accuracy,
-                                                   self._digit_caps_norm], feed_dict={self._x: data[0],
-                                                                                      self._y_: data[1]})
+                                                   self._digit_caps_norm],
+                                                  feed_dict={self._x: x,
+                                                             self._y_: y})
         if acc < 1:
             ori_img = np.reshape(ori_img, [batch_size, 28, 28])
             res_img = np.reshape(res_img, [batch_size, 28, 28])
@@ -470,73 +471,58 @@ class CapsNet(object):
                     if idx == batch_size:
                         break
                     plt.subplot(2 * num_rows, 10, idx + 1 + 10 * r)
-                    imshow_noax(ori_img[idx], True)
-                    # plt.ylabel(label[idx])
+                    imshow_noax(ori_img[idx])
                     plt.title(label[idx])
                     plt.subplot(2 * num_rows, 10, idx + 11 + 10 * r)
                     imshow_noax(res_img[idx])
                     plt.title("%s_%.3f" % (res_label[idx], norms[idx][res_label[idx]]))
-                    # plt.axis('off')
 
-            # fig.tight_layout()
             # plt.show()
             self._count += 1
-            plt.savefig('./figs/rc_exp_%s.png' % self._count, dpi=200)
+            plt.savefig(save_path + '/%s.png' % self._count, dpi=200)
 
-    def eval_arch(self):
+    def eval_architecture(self, mode):
         """evaluation architecture"""
         with tf.variable_scope('CapsNet', initializer=self._w_initializer):
             self._build_net()
-            y_expand = tf.expand_dims(self._y_, axis=2)
-            target_cap = tf.multiply(self._digit_caps, y_expand)
-            # [None, 1, 16]
-            target_cap = tf.reduce_sum(target_cap, axis=1, keep_dims=True)
-            # [None, 176, 16]
-            caps = target_cap + tweak_matrix()
-            self._reconstruct(tf.reshape(caps, [-1, 16]))
+            if mode in ('cap_tweak', 'reconstruct'):
+                y_expand = tf.expand_dims(self._y_, axis=2)
+                target_cap = tf.multiply(self._digit_caps, y_expand)
+                # [None, 16]
+                target_cap = tf.reduce_sum(target_cap, axis=1)
+                if mode == 'cap_tweak':
+                    # [None, 1, 16]
+                    target_cap = tf.expand_dims(target_cap, axis=1)
+                    # [None, 176, 16]
+                    caps = target_cap + tweak_matrix()
+                    self._reconstruct(tf.reshape(caps, [-1, 16]))
+                else:
+                    self._reconstruct(target_cap)
+            elif mode == 'adversarial':
+                self._adver_loss = tf.reduce_sum(self._digit_caps_norm * self._y_)
+                grads = tf.gradients(self._adver_loss, self._x)
+                self._adver_graidents = grads / tf.norm(grads)
+                self._py = tf.argmax(self._digit_caps_norm, 1)
+            else:
+                raise NotImplementedError
 
             self.saver = tf.train.Saver()
 
-            # self._recons_img = tf.transpose(tf.reshape(recons_img, [-1, 11, 16]), [0, 2, 1])
+    def cap_tweak(self, sess, x, y, save_path='../figs/cap_tweak'):
 
-    def dim_representation(self, sess, i):
-        label = [None]
-        while label[0] != i:
-            data = self._mnist.test.next_batch(1)
-            label = np.argmax(np.array(data[1]), axis=1)
-        res_img = sess.run(self._recons_img, feed_dict={self._x: data[0],
-                                                        self._y_: data[1]})
+        res_img = sess.run(self._recons_img, feed_dict={self._x: x,
+                                                        self._y_: y})
         res_img = np.reshape(res_img, [-1, 28, 28])
-
         fig, _ = plt.subplots(nrows=11, ncols=16, figsize=(10, 7))
         for i in xrange(11):
             for j in xrange(16):
                 idx = j + i * 16
-                # plt_idx = j * 11 + i + 1
                 plt.subplot(11, 16, idx + 1)
                 imshow_noax(res_img[idx])
 
         # plt.show()
-        plt.savefig('./figs/dr_exp_%s.png' % self._count, dpi=200)
+        plt.savefig(save_path + '/dr_exp_%s.png' % self._count, dpi=200)
         self._count += 1
-
-    def adversarial_arch(self):
-        with tf.variable_scope('CapsNet', initializer=self._w_initializer):
-            self._build_net()
-
-            self._digit_caps_norm = tf.norm(self._digit_caps, ord=2, axis=2,
-                                            name='digit_caps_norm')
-            # digit_caps_norm shape: [None, 10]
-            # optimizer = tf.train.AdamOptimizer()
-
-            self._adver_loss = tf.reduce_sum(self._digit_caps_norm * self._y_)
-            grads = tf.gradients(self._adver_loss, self._x)
-            self._adver_graidents = grads / tf.norm(grads)
-            self._adver_graidents_norm = tf.norm(grads)
-
-            self._py = tf.argmax(self._digit_caps_norm, 1)
-
-            self.saver = tf.train.Saver()
 
     def adversarial_test(self, sess, ori_num, target_num, lamb=1):
         """advertisal test"""
@@ -569,7 +555,7 @@ class CapsNet(object):
         imshow_noax(x[0])
         plt.title('adversarial: %s' % target_num)
         plt.subplot(1, 3, 3)
-        imshow_noax((x[0] - ori_img[0]) * 100)
+        imshow_noax((x[0] - ori_img[0]))
         plt.title('difference(normalized)')
 
         plt.savefig('./figs/adversarial/advert_%s_to_%s' % (label[0], target_num))
