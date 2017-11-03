@@ -51,6 +51,16 @@ class CapsNet(object):
 
         self._bad_example = 0
 
+        # set up placeholder of input data and labels
+        self._x = tf.placeholder(tf.float32, [None, 784])
+        self._y_ = tf.placeholder(tf.float32, [None, 10])
+
+        # set up initializer for weights and bias
+        self._w_initializer = tf.truncated_normal_initializer(stddev=0.1)
+        self._b_initializer = tf.zeros_initializer()
+
+        self._tweak_range = np.arange(-25, 26, 5) / 100.
+
     def _capsule(self, input, i_c, o_c, idx):
         """
         compute a capsule,
@@ -207,30 +217,16 @@ class CapsNet(object):
         # shape [None, 10, 16]
         return digit_caps
 
-    def _reconstruct(self, digit_caps):
+    def _reconstruct(self, target_cap):
         """
         reconstruct from digit capsules with 3 fully connected layer
         :param
-            digit_caps: digit capsules with shape [None, 10, 16]
+            digit_caps: digit capsules with shape [None, 16]
         :return:
             out: out of reconstruction
         """
-        # (TODO wu) there is two ways to do reconstruction.
-        # 1. only use the target capsule with dimension [None, 16] or [16,] (use it for default)
-        # 2. use all the capsule, including the masked out ones with lots of zeros
+
         with tf.name_scope('reconstruct'):
-            y_ = tf.expand_dims(self._y_, axis=2)
-            # y_ shape: [None, 10, 1]
-
-            # for method 1.
-            target_cap = y_ * digit_caps
-            # target_cap shape: [None, 10, 16]
-            target_cap = tf.reduce_sum(target_cap, axis=1)
-            # target_cap: [None, 16]
-
-            # for method 2.
-            # target_cap = tf.reshape(y_ * digit_caps, [-1, 10*16])
-
             fc = slim.fully_connected(target_cap, 512,
                                       weights_initializer=self._w_initializer)
             fc = slim.fully_connected(fc, 1024,
@@ -242,7 +238,7 @@ class CapsNet(object):
             out = tf.sigmoid(fc)
             # out with shape [None, 784]
 
-            self._rescon_img = out
+            self._recons_img = out
             return out
 
     def _add_loss(self, digit_caps):
@@ -279,7 +275,23 @@ class CapsNet(object):
             tf.summary.scalar('neg_loss', neg_loss)
             # neg_loss shape: [None, ]
 
-            reconstruct = self._reconstruct(digit_caps)
+            # (TODO wu) there is two ways to do reconstruction.
+            # 1. only use the target capsule with dimension [None, 16] or [16,] (use it for default)
+            # 2. use all the capsule, including the masked out ones with lots of zeros
+
+            y_ = tf.expand_dims(self._y_, axis=2)
+            # y_ shape: [None, 10, 1]
+
+            # for method 1.
+            target_cap = y_ * digit_caps
+            # target_cap shape: [None, 10, 16]
+            target_cap = tf.reduce_sum(target_cap, axis=1)
+            # target_cap: [None, 16]
+
+            # for method 2.
+            # target_cap = tf.reshape(y_ * digit_caps, [-1, 10*16])
+
+            reconstruct = self._reconstruct(target_cap)
 
             # loss of reconstruction
             with tf.name_scope('l2_loss'):
@@ -296,17 +308,14 @@ class CapsNet(object):
 
     def creat_architecture(self):
         """creat architecture of the whole network"""
-        # set up placeholder of input data and labels
-        self._x = tf.placeholder(tf.float32, [None, 784])
-        self._y_ = tf.placeholder(tf.float32, [None, 10])
 
-        # set up initializer for weights and bias
-        self._w_initializer = tf.truncated_normal_initializer(stddev=0.1)
-        self._b_initializer = tf.zeros_initializer()
 
         with tf.variable_scope('CapsNet', initializer=self._w_initializer):
             # build net
             self._build_net()
+
+            # set up losses
+            self._loss = self._add_loss(self._digit_caps)
 
             # set up exponentially decay learning rate
             self._global_step = tf.Variable(0, trainable=False)
@@ -401,9 +410,6 @@ class CapsNet(object):
         with tf.variable_scope("digit_caps"):
             self._digit_caps = self._dynamic_routing(primary_caps, 1)
 
-        # set up losses
-        self._loss = self._add_loss(self._digit_caps)
-
     def _accuracy(self):
         with tf.name_scope('accuracy'):
             # digit_caps_norm = tf.norm(self._digit_caps, ord=2, axis=-1)
@@ -471,7 +477,7 @@ class CapsNet(object):
         data = self._mnist.test.next_batch(batch_size)
         ori_img = np.array(data[0])
         label = np.argmax(np.array(data[1]), axis=1)
-        res_img, res_label, acc = sess.run([self._rescon_img, self._py, self.accuracy], feed_dict={self._x: data[0],
+        res_img, res_label, acc = sess.run([self._recons_img, self._py, self.accuracy], feed_dict={self._x: data[0],
                                                         self._y_: data[1]})
         if acc < 1:
             ori_img = np.reshape(ori_img, [batch_size, 28, 28])
@@ -497,11 +503,39 @@ class CapsNet(object):
             self._bad_example += 1
             plt.savefig('./figs/%s.png' % self._bad_example, dpi=200)
 
+    def eval_arch(self):
+        """evaluation architecture"""
+        self._build_net()
+        y_expand = tf.expand_dims(self._y_, axis=2)
+        target_cap = tf.multiply(self._digit_caps, y_expand)
+        # [None, 1, 16]
+        target_cap = tf.reduce_sum(target_cap, axis=1, keep_dims=True)
+        # [None, 11, 16]
+        caps = target_cap + self._tweak_range[:, None]
+        self._reconstruct(tf.reshape(caps, [-1, 16]))
+        # self._recons_img = tf.transpose(tf.reshape(recons_img, [-1, 11, 16]), [0, 2, 1])
+
+    def dim_representation(self, sess):
+        data = self._mnist.test.next_batch(1)
+        res_img = sess.run(self._recons_img, feed_dict={self._x: data[0],
+                                                        self._y_: data[1]})
+        res_img = np.reshape(res_img, [-1, 28, 28])
+
+        fig, _ = plt.subplots(nrows=16, ncols=11, figsize=(10, 7))
+        for i in xrange(11):
+            for j in xrange(16):
+                idx = j + i * 11
+                plt_idx = j * 11 + i + 1
+                plt.subplot(16, 11, plt_idx)
+                imshow_noax(res_img[idx])
+
+        plt.show()
+
 
 def imshow_noax(img, nomalize=True):
     if nomalize:
         img_max, img_min = np.max(img), np.min(img)
         img = 255. * (img - img_min) / (img_max - img_min)
 
-    plt.imshow(img.astype('uint8'))
+    plt.imshow(img.astype('uint8'), cmap='gray')
     plt.gca().axis('off')
