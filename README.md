@@ -28,14 +28,14 @@ tqdm>=4.17.1
 install by running 
 
 ```bash
+$ cd $ROOT
 $ pip install -r requirements.txt
 ``` 
-in `ROOT` directory.
 
 ## Experiments
 
 **NOTE: all the experiments conducted on the checkpoint: [Jbox(SJTU)](https://jbox.sjtu.edu.cn/l/SHwJ5d) or
-[GOOGEL DRIVE](https://drive.google.com/file/d/0B42lXNgnb27XZ0JKRjdiVldyRzQ/view?usp=sharing)**
+[Google_Drive](https://drive.google.com/file/d/0B42lXNgnb27XZ0JKRjdiVldyRzQ/view?usp=sharing)**
 
 ### reconstruction 
 
@@ -48,7 +48,6 @@ $ python eval.py --ckpt 'path/to/ckpt' --mode reconstruct
 (Note: the float numbers on the row with even number are max norm of the 10 digit capsules)
 
 ![1](./figs/reconstruct/2.png)
-
 ![2](./figs/reconstruct/2.png)
 
 
@@ -59,7 +58,10 @@ By running:
 $ cd code
 $ python eval.py --ckpt 'path/to/ckpt' --mode cap_tweak
 ```
-**results:**
+**results:**  
+
+Note: images along `x-axis` are representations of units of 16-D vector, and `y-axis` corresponds 
+to the tweak range of [-0.25, 0.25] with stride 0.05.
 
 ![cap_tweak-1](./figs/cap_tweak/class_3.png)
 ![cap_tweak-1](./figs/cap_tweak/class_6.png)
@@ -127,8 +129,8 @@ $ bash train.sh
 ```
 
 ## TODO
-- [ ] fix the inefficacy
-- [ ] report exclusive experiment results
+- [x] report exclusive experiment results
+- [ ] try to fix the inefficacy
 
 ## Reference
 

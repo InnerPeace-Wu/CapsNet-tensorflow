@@ -553,6 +553,7 @@ class CapsNet(object):
 
         x_fooling = np.reshape(x_fooling, [28, 28])
 
+        fig, _ = plt.subplots(nrows=1, ncols=3, figsize=(6, 2))
         plt.subplot(1, 3, 1)
         imshow_noax(ori_img)
         plt.title('orignal: %s' % ori_num)
