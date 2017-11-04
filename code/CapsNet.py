@@ -452,7 +452,7 @@ class CapsNet(object):
         t = time.time() - tic
         print("{} set accuracy: {}, with time: {:.2f} secs".format(set, all_ac, t))
 
-    def eval_reconstuct(self, sess, x, y, batch_size, save_path):
+    def reconstruct_eval(self, sess, x, y, batch_size):
         """do image reconstruction and representations"""
         ori_img = x
         label = np.argmax(y, axis=1)
@@ -479,9 +479,9 @@ class CapsNet(object):
 
             # plt.show()
             self._count += 1
-            plt.savefig(save_path + '/%s.png' % self._count, dpi=200)
+            plt.savefig(self._fig_dir + '/%s.png' % self._count, dpi=200)
 
-    def eval_architecture(self, mode):
+    def eval_architecture(self, mode, fig_dir):
         """evaluation architecture"""
         with tf.variable_scope('CapsNet', initializer=self._w_initializer):
             self._build_net()
@@ -496,7 +496,9 @@ class CapsNet(object):
                     # [None, 176, 16]
                     caps = target_cap + tweak_matrix()
                     self._reconstruct(tf.reshape(caps, [-1, 16]))
+                # reconstruct mode
                 else:
+                    self._accuracy()
                     self._reconstruct(target_cap)
             elif mode == 'adversarial':
                 self._adver_loss = tf.reduce_sum(self._digit_caps_norm * self._y_)
@@ -506,9 +508,14 @@ class CapsNet(object):
             else:
                 raise NotImplementedError
 
+            self._fig_dir = fig_dir + '/%s' % mode
+            if not os.path.exists(self._fig_dir):
+                os.makedirs(self._fig_dir)
+
             self.saver = tf.train.Saver()
 
-    def cap_tweak(self, sess, x, y, save_path='../figs/cap_tweak'):
+    def cap_tweak(self, sess, x, y):
+        """capsule unit representation tweaking test"""
 
         res_img = sess.run(self._recons_img, feed_dict={self._x: x,
                                                         self._y_: y})
@@ -521,44 +528,42 @@ class CapsNet(object):
                 imshow_noax(res_img[idx])
 
         # plt.show()
-        plt.savefig(save_path + '/dr_exp_%s.png' % self._count, dpi=200)
+        plt.savefig(self._fig_dir + '/class_%s.png' % self._count, dpi=200)
         self._count += 1
 
-    def adversarial_test(self, sess, ori_num, target_num, lamb=1):
+    def adversarial_eval(self, sess, x, ori_num, target_num, lr=1):
         """advertisal test"""
-        label = [None]
-        while label[0] != ori_num:
-            data = self._mnist.test.next_batch(1)
-            label = np.argmax(np.array(data[1]), axis=1)
-        count = 0
-        ori_img = np.reshape(data[0], [-1, 28, 28])
-        x = data[0].copy()
-        py = None
 
+        ori_img = np.reshape(x, [28, 28])
+        # shallow copy is crucial
+        x_fooling = x.copy()
+
+        py = [None]
         tar_oh = np.zeros(10, dtype=np.float32)
         tar_oh[target_num] = 1
-        while py != target_num:
-            grads, py, norm = sess.run([self._adver_graidents, self._py, self._adver_graidents_norm],
-                                       feed_dict={self._x: x,
+        self._count = 0
+        while py[0] != target_num:
+            grads, py = sess.run([self._adver_graidents, self._py],
+                                       feed_dict={self._x: x_fooling,
                                                   self._y_: tar_oh[None, :]})
-            x += lamb * grads[0]
-            count += 1
-            print("predict: {}, count: {}".format(py, count))
-            print("diff: {}".format(np.sum((x - data[0]))))
+            x_fooling += lr * grads[0]
+            self._count += 1
+            print("predict: {}, count: {}".format(py, self._count))
+            print("sum of diff: {}".format(np.sum(np.abs(x - x_fooling))))
 
-        x = np.reshape(x, [-1, 28, 28])
+        x_fooling = np.reshape(x_fooling, [28, 28])
 
         plt.subplot(1, 3, 1)
-        imshow_noax(ori_img[0])
-        plt.title('orignal: %s' % label[0])
+        imshow_noax(ori_img)
+        plt.title('orignal: %s' % ori_num)
         plt.subplot(1, 3, 2)
-        imshow_noax(x[0])
+        imshow_noax(x_fooling)
         plt.title('adversarial: %s' % target_num)
         plt.subplot(1, 3, 3)
-        imshow_noax((x[0] - ori_img[0]))
+        imshow_noax(x_fooling - ori_img)
         plt.title('difference(normalized)')
 
-        plt.savefig('./figs/adversarial/advert_%s_to_%s' % (label[0], target_num))
+        plt.savefig(self._fig_dir + '/%s_to_%s' % (ori_num, target_num))
         # plt.show()
 
 

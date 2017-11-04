@@ -7,19 +7,16 @@ from __future__ import division
 from __future__ import print_function
 
 import argparse
-import os
 import sys
-import time
+from tqdm import tqdm
 
 import tensorflow as tf
 import numpy as np
 from six.moves import xrange
 from tensorflow.examples.tutorials.mnist import input_data
 
-import matplotlib.pyplot as plt
 from CapsNet import CapsNet
 from config import cfg
-from utils import squash, imshow_noax, tweak_matrix
 
 
 def parse_arg():
@@ -42,7 +39,7 @@ def parse_arg():
     parser.add_argument('--max_iters', dest='max_iters', type=int,
                         default=50, help='batch size for reconstruct evaluation')
     parser.add_argument('--tweak_target', dest='tweak_target', type=int,
-                        default=5, help='target number for capsule tweaking experiment')
+                        default=None, help='target number for capsule tweaking experiment')
     parser.add_argument('--fig_dir', dest='fig_dir', type=str,
                         default='../figs', help='directory to save figures')
     parser.add_argument('--lr', dest='lr', type=float,
@@ -69,7 +66,7 @@ def main():
     # Create the model
     caps_net = CapsNet()
     # build up architecture
-    caps_net.eval_architecture(args.mode)
+    caps_net.eval_architecture(args.mode, args.fig_dir)
 
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -77,32 +74,37 @@ def main():
     if args.ckpt:
         ckpt = tf.train.get_checkpoint_state(args.ckpt)
     else:
-        raise ValueError, 'no ckpt found.'
+        raise ValueError
 
     with tf.Session(config=config) as sess:
         print("Reading parameters from %s" % ckpt.model_checkpoint_path)
         caps_net.saver.restore(sess, ckpt.model_checkpoint_path)
 
         if args.mode == 'cap_tweak':
-            save_path = args.fig_dir + '/cap_tweak'
-            if not os.path.exists(save_path):
-                os.makedirs(save_path)
-            label = None
-            while label != cfg.tweak_target:
-                x, y = mnist.test.next_batch(1)
-                label = np.argmax(y)
-            caps_net.cap_tweak(sess, x, y, save_path)
+            for i in tqdm(xrange(10), desc='capsule tweaking'):
+                label = None
+                while label != i:
+                    x, y = mnist.test.next_batch(1)
+                    label = np.argmax(y)
+                caps_net.cap_tweak(sess, x, y)
 
         elif args.mode == 'reconstruct':
-            save_path = args.fig_dir + '/recons'
-            if not os.path.exists(save_path):
-                os.makedirs(save_path)
-            for i in xrange(args.max_iters):
+            for i in tqdm(xrange(args.max_iters), desc='reconstructing'):
                 x, y = mnist.test.next_batch(args.batch_size)
-                caps_net.eval_reconstruct(sess, x, y, args.batch_size, save_path)
+                caps_net.reconstruct_eval(sess, x, y, args.batch_size)
 
-
-
+        # adversarial test
+        else:
+            for ori in xrange(10):
+                print('------ class {} ------'.format(ori))
+                label = None
+                while label != ori:
+                    x, y = mnist.test.next_batch(1)
+                    label = np.argmax(y)
+                for tar in xrange(10):
+                    if ori == tar:
+                        continue
+                    caps_net.adversarial_eval(sess, x, ori, tar, args.lr)
 
 
 if __name__ == '__main__':

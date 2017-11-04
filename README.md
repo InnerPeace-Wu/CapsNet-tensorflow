@@ -10,7 +10,7 @@ representation of image with capsule`**.
 
 * The less accurate may due to the missing `3M` parameters.(My implementaion with 8M 
 compared to 11M referred in the paper.)
-* About to do some `representation` experiment with the latest training result.
+* The model is still under-fitting.
 
 ## Dependencies
 
@@ -18,6 +18,8 @@ compared to 11M referred in the paper.)
 * Other dependencies as follows, 
 
 ```
+six>=1.11
+matplotlib>=2.0.2
 numpy>=1.7.1
 scipy>=0.13.2
 easydict>=1.6
@@ -30,24 +32,55 @@ $ pip install -r requirements.txt
 ``` 
 in `ROOT` directory.
 
-
-
-## Train
-
-* clone the repo, and set up parameters in `code/config.py`
-* then 
-
-```bash
-$ cd $ROOT/code
-$ python train.py
-```
-or train with logs by runing:
-```bash
-$ cd $ROOT/code
-$ bash train.sh
-```
-
 ## Experiments
+
+**NOTE: all the experiments conducted on the checkpoint: [Jbox(SJTU)](https://jbox.sjtu.edu.cn/l/SHwJ5d) or
+[GOOGEL DRIVE](https://drive.google.com/file/d/0B42lXNgnb27XZ0JKRjdiVldyRzQ/view?usp=sharing)**
+
+### reconstruction 
+
+By running:
+```bash
+$ cd code
+$ python eval.py --ckpt 'path/to/ckpt' --mode reconstruct
+```
+**reconstruct results:**
+(Note: the float numbers on the row with even number are max norm of the 10 digit capsules)
+
+![1](./figs/reconstruct/2.png)
+
+![2](./figs/reconstruct/2.png)
+
+
+### capsule unit representation
+
+By running:
+```bash
+$ cd code
+$ python eval.py --ckpt 'path/to/ckpt' --mode cap_tweak
+```
+**results:**
+
+![cap_tweak-1](./figs/cap_tweak/class_3.png)
+![cap_tweak-1](./figs/cap_tweak/class_6.png)
+
+### adversarial test
+By running:
+```bash
+$ cd code
+$ python eval.py --ckpt 'path/to/ckpt' --mode adversarial
+```
+
+**result:**
+
+![adver-1](./figs/adversarial/0_to_8.png)
+![adver-2](./figs/adversarial/3_to_8.png)
+![adver-3](./figs/adversarial/5_to_0.png)
+
+**the adversarial result is not as good as i expected, I was hoping that `capsule` representation 
+would be more robust to adversarial attack.**
+
+### training 
 
 Note: all trained with `batch_size = 100`
 
@@ -77,7 +110,21 @@ Iterations | 2k     | 4k    | 5k    | 7k    | 9k    | 10k
   test_acc |   -    |   -   | 98.89 |   -   |   -   | 99.09 
   
 
+## Train
 
+* clone the repo, and set up parameters in `code/config.py`
+* then 
+
+```bash
+$ cd $ROOT/code
+$ python train.py --data_dir 'path/to/data' --max_iters 10000 --ckpt 'OPTIONAL:path/to/ckpt' --batch_size 100
+```
+or train with logs by runing(NOTE: set extra arguments in train.sh accordingly):
+
+```bash
+$ cd $ROOT/code
+$ bash train.sh
+```
 
 ## TODO
 - [ ] fix the inefficacy
