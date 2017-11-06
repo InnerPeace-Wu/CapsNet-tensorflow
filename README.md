@@ -8,9 +8,7 @@ Note: this implementation strictly follow the instructions of the paper, check t
 **The key of the paper is not how accurate the `CapsNet` is, but the `novel idea of 
 representation of image with capsule`**.
 
-* The less accurate may due to the missing `3M` parameters.(My implementaion with 8M 
-compared to 11M referred in the paper.)
-* The model is still under-fitting.
+
 
 ## Dependencies
 
@@ -127,6 +125,10 @@ or train with logs by runing(NOTE: set extra arguments in train.sh accordingly):
 $ cd $ROOT/code
 $ bash train.sh
 ```
+
+* ~~The less accurate may due to the missing `3M` parameters.(My implementaion with 8M 
+compared to 11M referred in the paper.)~~ Different input size.
+* The model is still under-fitting.
 
 ## TODO
 - [x] report exclusive experiment results
